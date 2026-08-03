@@ -19,6 +19,7 @@ and the tests that keep it honest.
 
 - [What it does](#what-it-does)
 - [Why it's built this way](#why-its-built-this-way)
+- [How this differs from other CRDT implementations](#how-this-differs-from-other-crdt-implementations)
 - [How the CRDT works](#how-the-crdt-works)
 - [Correctness: two properties, not one](#correctness-two-properties-not-one)
 - [Performance](#performance)
@@ -77,6 +78,71 @@ targets makes that entire bug class impossible rather than merely unlikely.
 CodeMirror 6 emits clean position-based change events (`from`, `to`, `inserted`),
 which map directly onto CRDT insert/delete operations. Raw `contenteditable` would
 mean diffing DOM mutations to guess what the user did.
+
+---
+
+## How this differs from other CRDT implementations
+
+**First, what it isn't.** RGA is a published algorithm
+([Roh et al., 2011](https://doi.org/10.1016/j.jpdc.2010.12.006)), not something
+invented here, and this is not a competitor to Yjs or Automerge. Those are
+production libraries with years of optimization behind them, and on nearly every
+practical axis they win:
+
+| | Yjs | Automerge | This project |
+|---|---|---|---|
+| Algorithm | YATA | RGA variant | RGA |
+| Core language | JavaScript | Rust | Rust |
+| In the browser | native JS | Rust → WASM | Rust → WASM |
+| Maturity | production | production | learning project |
+| Comfortable document size | millions of chars | very large | ~10k chars |
+| Tombstone garbage collection | yes | yes | no |
+| Persistence / offline | yes | yes | not yet |
+
+If you need a collaborative editor for real work, use one of those. The point of
+this project is to build the hard parts by hand and be able to explain them.
+
+**Where it does diverge from a typical from-scratch implementation:**
+
+**1. One implementation, not two.** The usual approach — including in most
+from-scratch attempts — is to write the CRDT in the backend language and then
+re-write it in JavaScript for the browser. Those copies drift, and the resulting
+corruption bugs surface only under specific interleavings on someone else's
+machine. Here the server and the browser run the *same compiled crate*. This
+mirrors Automerge's architecture rather than inventing anything; the notable part
+is choosing it deliberately at the start instead of discovering the need after
+the drift bugs appear.
+
+**2. Deletion tracks *who* deleted, not just *that* it was deleted.** Most
+implementations treat deletion as idempotent — a node is deleted or it isn't.
+That's sufficient for convergence, but it makes correct undo impossible in one
+specific case: you delete a character, someone else independently deletes the same
+character, and you undo. With a boolean flag, your undo resurrects content another
+user validly deleted. Storing `deleted_by` as a *set* of operation ids makes undo
+naturally compositional — you remove only your own entry, and theirs still hides
+the node. This is the one design decision here that meaningfully constrains the
+rest of the system, and it's tested directly.
+
+**3. Convergence and intent are tested as separate properties.** The distinction
+isn't new — it's the *intention preservation* leg of the CCI model
+([Sun et al., 1998](https://doi.org/10.1145/274444.274447)) — but it's routinely
+collapsed into "does it converge?" in practice. This project has a worked example
+of why that's insufficient: a real undo bug that passed 200 cases of the
+convergence harness, because every replica converged perfectly on the wrong
+document. The [correctness section](#correctness-two-properties-not-one) walks
+through it, including the fact that the *obvious* formulation of the intent
+property was also blind to the bug.
+
+**4. Known flaws are pinned by tests, not hidden.** RGA's interleaving anomaly is
+a genuine weakness of the algorithm. Rather than omit it, there's a test that
+demonstrates it and asserts the property that *does* still hold — every replica
+agrees on the same interleaving. Likewise the benchmarks report the unflattering
+number (6.2 ms to type at the top of a 50k-character document) alongside the good
+one, and identify the cause.
+
+The short version: the algorithm is standard, the architecture is borrowed from
+the best available example, and what's actually distinctive is the rigour applied
+to correctness and the willingness to document where it falls short.
 
 ---
 
