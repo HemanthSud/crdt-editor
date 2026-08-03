@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  crdt-core:
+    name: CRDT property tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test --workspace
+
+      # Timings are too noisy on shared runners to assert on, but the benchmark
+      # still has to compile against the current API.
+      - name: Check benchmarks build
+        run: cargo bench -p crdt-core --no-run
+
+  client:
+    name: Client build + WASM freshness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      # The committed artifacts under client/src/wasm are what Vercel actually
+      # ships (its build image has no Rust). Fail loudly if crdt-core changed
+      # without them being rebuilt.
+      - name: Check committed WASM artifacts are not stale
+        run: ./scripts/build-wasm.sh --check
+
+      - name: Install client deps
+        run: npm ci
+        working-directory: client
+
+      - name: Typecheck and build
+        run: npm run build
+        working-directory: client

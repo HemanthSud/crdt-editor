@@ -91,10 +91,17 @@ async fn main() {
 
     let state = AppState::default();
     let app = Router::new()
+        .route("/health", get(|| async { "ok" }))
         .route("/ws/{doc_id}", get(ws_handler))
         .with_state(state);
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 8787));
+    // Bind all interfaces: in a container the host-side port mapping only reaches
+    // 0.0.0.0, so a 127.0.0.1 bind would be unreachable from outside.
+    let port: u16 = std::env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(8787);
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     tracing::info!("CRDT server listening on ws://{addr}/ws/:doc_id");
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();

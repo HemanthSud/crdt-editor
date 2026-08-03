@@ -11,22 +11,28 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 use rand::SeedableRng;
 
-const N_SITES: u64 = 3;
+const N_SITES: u64 = 4;
 
 #[derive(Debug, Clone)]
 enum Action {
     Insert { site: u64, pos_frac: f32, ch: char },
     Delete { site: u64, pos_frac: f32 },
+    Undo { site: u64 },
+    Redo { site: u64 },
 }
 
 fn arb_action() -> impl Strategy<Value = Action> {
+    // Inserts are weighted higher than the rest so generated documents actually
+    // grow enough for deletes and undos to have something to act on.
     prop_oneof![
-        (0..N_SITES, 0.0f32..1.0, "[a-zA-Z]").prop_map(|(site, pos_frac, s)| Action::Insert {
+        3 => (0..N_SITES, 0.0f32..1.0, "[a-zA-Z]").prop_map(|(site, pos_frac, s)| Action::Insert {
             site,
             pos_frac,
             ch: s.chars().next().unwrap_or('x'),
         }),
-        (0..N_SITES, 0.0f32..1.0).prop_map(|(site, pos_frac)| Action::Delete { site, pos_frac }),
+        2 => (0..N_SITES, 0.0f32..1.0).prop_map(|(site, pos_frac)| Action::Delete { site, pos_frac }),
+        1 => (0..N_SITES).prop_map(|site| Action::Undo { site }),
+        1 => (0..N_SITES).prop_map(|site| Action::Redo { site }),
     ]
 }
 
@@ -56,11 +62,26 @@ fn run_and_check_convergence(actions: &[Action], seed: u64) {
             }
             Action::Delete { site, pos_frac } => {
                 let r = &mut replicas[*site as usize];
-                if r.len() > 0 {
+                if !r.is_empty() {
                     let pos = frac_to_pos(*pos_frac, r.len()).min(r.len() - 1);
                     if let Some(op) = r.local_delete(pos) {
                         all_ops.push(op);
                     }
+                }
+            }
+            // Undo/redo emit compensating ops (Delete / Restore) that travel the
+            // network like any other op, so they go into the same shuffled delivery
+            // set below. Restore depends on both its target and the delete it
+            // removes (see Op::dependencies), so this also exercises the causal
+            // buffer holding a Restore until the Delete it reverses arrives.
+            Action::Undo { site } => {
+                if let Some(op) = replicas[*site as usize].undo() {
+                    all_ops.push(op);
+                }
+            }
+            Action::Redo { site } => {
+                if let Some(op) = replicas[*site as usize].redo() {
+                    all_ops.push(op);
                 }
             }
         }

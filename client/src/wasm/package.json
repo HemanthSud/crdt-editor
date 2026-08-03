@@ -1,0 +1,15 @@
+{
+  "name": "client-wasm",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "client_wasm_bg.wasm",
+    "client_wasm.js",
+    "client_wasm.d.ts"
+  ],
+  "main": "client_wasm.js",
+  "types": "client_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

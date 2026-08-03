@@ -1,0 +1,32 @@
+# Fly.io config for the CRDT WebSocket relay.
+# Deploy with:  fly launch --no-deploy   (once, to create the app)
+#               fly deploy
+# Then set VITE_WS_URL=wss://<app-name>.fly.dev in the Vercel project.
+
+app = "crdt-editor"
+primary_region = "iad"
+
+[build]
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Document state lives only in memory (AppState.rooms in crates/server/src/main.rs) -
+  # there is no persistence layer yet, so a machine stop discards every document.
+  # Auto-stop is therefore disabled: with it on, a demo document would silently
+  # vanish whenever the app idled out between visitors. Milestone 4 (Postgres op
+  # log + snapshots) is what makes stopping safe.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "5s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

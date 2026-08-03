@@ -8,7 +8,21 @@ type ServerMsg =
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
 
-const WS_URL = (docId: string) => `ws://localhost:8787/ws/${docId}`;
+const WS_BASE = import.meta.env.VITE_WS_URL ?? "ws://localhost:8787";
+const WS_URL = (docId: string) => `${WS_BASE}/ws/${encodeURIComponent(docId)}`;
+
+/**
+ * CodeMirror measures positions in UTF-16 code units; `crdt-core` indexes by
+ * Unicode scalar value (Rust `char`). They agree for the BMP and diverge the
+ * moment a document contains an emoji or any other astral character - after
+ * which every subsequent op targets the wrong node. Convert at the boundary.
+ */
+const toCodePointIndex = (text: string, utf16Pos: number) =>
+  [...text.slice(0, utf16Pos)].length;
+
+/** Number of code points in a UTF-16 span - a delete length, in CRDT terms. */
+const codePointLength = (text: string, from: number, to: number) =>
+  [...text.slice(from, to)].length;
 
 /**
  * Owns one CrdtClient (crdt-core compiled to WASM) plus the WebSocket that
@@ -75,10 +89,31 @@ export function useCrdtClient(docId: string) {
     (ops: LocalOp[]) => {
       const client = clientRef.current;
       if (!client || !readyRef.current) return;
-      for (const op of ops) {
+
+      // CodeMirror reports every change in one transaction against the *same*
+      // pre-edit document, so all positions must be converted against that same
+      // base text before we start mutating the CRDT.
+      const base = client.render_text();
+      const converted: LocalOp[] = ops.map((op) =>
+        op.kind === "insert"
+          ? { kind: "insert", pos: toCodePointIndex(base, op.pos), text: op.text }
+          : {
+              kind: "delete",
+              pos: toCodePointIndex(base, op.pos),
+              len: codePointLength(base, op.pos, op.pos + op.len),
+            },
+      );
+
+      // Apply back-to-front: each op shifts the positions after it, so starting
+      // from the highest position keeps every remaining (pre-edit) position valid.
+      // Array.prototype.sort is stable, so a delete+insert pair at the same
+      // position (a replacement) keeps its delete-then-insert order.
+      converted.sort((a, b) => b.pos - a.pos);
+
+      for (const op of converted) {
         if (op.kind === "insert") {
           // The editor gives us a whole inserted string (e.g. a paste); crdt-core
-          // inserts one character at a time, each becoming its own RGA node.
+          // inserts one code point at a time, each becoming its own RGA node.
           let pos = op.pos;
           for (const ch of op.text) {
             const opJson = client.localInsert(pos, ch);

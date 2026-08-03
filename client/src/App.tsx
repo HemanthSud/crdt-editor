@@ -31,7 +31,13 @@ export default function App() {
           Redo
         </button>
       </div>
-      <Editor initialText={text} remoteText={text} onLocalOps={applyLocalOps} />
+      <Editor
+        initialText={text}
+        remoteText={text}
+        onLocalOps={applyLocalOps}
+        onUndo={undo}
+        onRedo={redo}
+      />
     </div>
   );
 }

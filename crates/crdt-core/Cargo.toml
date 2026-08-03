@@ -9,3 +9,8 @@ serde = { version = "1", features = ["derive"] }
 [dev-dependencies]
 proptest = "1"
 rand = "0.8"
+criterion = "0.5"
+
+[[bench]]
+name = "editing"
+harness = false

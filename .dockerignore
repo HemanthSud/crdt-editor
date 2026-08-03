@@ -1,0 +1,7 @@
+target/
+client/
+graphify-out/
+scripts/
+.git/
+.github/
+*.md

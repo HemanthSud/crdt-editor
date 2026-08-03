@@ -16,10 +16,11 @@ impl Node {
     }
 }
 
-/// One entry in a client's local undo/redo stack: the op that was applied, and the
-/// op that would reverse it (constructed lazily since it depends on the current
-/// document state, e.g. for redoing an insert we need a fresh Restore, not the
-/// original Delete).
+/// One entry on the undo stack: a local edit that can still be reversed.
+///
+/// Reversing ops are constructed lazily (a Delete is undone by a *new* Restore op,
+/// not by replaying the original), so each entry only needs to record the op ids
+/// its reversal will reference.
 #[derive(Debug, Clone)]
 enum UndoEntry {
     /// This insert created `id`; undoing it deletes that node.
@@ -28,11 +29,33 @@ enum UndoEntry {
     Delete { delete_id: OpId, target: OpId },
 }
 
+/// One entry on the redo stack: an undo that can still be re-applied.
+///
+/// Each variant carries the id of the op the *undo* actually emitted, rather than
+/// re-deriving it from the op log. That id is what redo must reverse, and it is
+/// not knowable from the original `UndoEntry` - the reason this is a separate type
+/// (see `delete_undo_redo_undo_returns_to_original` in tests/undo_redo.rs).
+#[derive(Debug, Clone)]
+enum RedoEntry {
+    /// `undo()` tombstoned `node` with the delete op `undo_delete`; redoing that
+    /// undo means removing exactly that tombstone again.
+    RestoreNode { node: OpId, undo_delete: OpId },
+    /// `undo()` restored `target`; redoing that undo means deleting it afresh.
+    Redelete { target: OpId },
+}
+
 /// A single-site replica of an RGA (Replicated Growable Array) text document.
 ///
 /// Convergence property: any two replicas that have applied the same set of ops
 /// (in any order, causal dependencies permitting) render identical text and
 /// identical tombstone state. See the proptest suite in `tests/convergence.rs`.
+///
+/// `Clone` produces a snapshot that keeps the *same* site id, so the two copies
+/// would mint colliding `OpId`s if both kept editing. It is meant for taking a
+/// throwaway copy of a document's state (benchmark setup, speculative apply),
+/// not for spawning a second independent replica - use `RgaDoc::new` with a
+/// fresh site id for that.
+#[derive(Clone)]
 pub struct RgaDoc {
     site: SiteId,
     counter: u64,
@@ -44,7 +67,7 @@ pub struct RgaDoc {
     applied: BTreeSet<OpId>,
     op_log: Vec<Op>,
     undo_stack: Vec<UndoEntry>,
-    redo_stack: Vec<UndoEntry>,
+    redo_stack: Vec<RedoEntry>,
 }
 
 impl RgaDoc {
@@ -145,60 +168,60 @@ impl RgaDoc {
     /// or None if there's nothing left to undo.
     pub fn undo(&mut self) -> Option<Op> {
         let entry = self.undo_stack.pop()?;
-        let op = match &entry {
+        let (op, redo) = match entry {
             UndoEntry::Insert { id } => {
                 let del_id = self.next_id();
-                Op::Delete { id: del_id, target: *id }
+                (
+                    Op::Delete { id: del_id, target: id },
+                    RedoEntry::RestoreNode { node: id, undo_delete: del_id },
+                )
             }
             UndoEntry::Delete { delete_id, target } => {
                 let restore_id = self.next_id();
-                Op::Restore {
-                    id: restore_id,
-                    target: *target,
-                    removes: *delete_id,
-                }
+                (
+                    Op::Restore {
+                        id: restore_id,
+                        target,
+                        removes: delete_id,
+                    },
+                    RedoEntry::Redelete { target },
+                )
             }
         };
         self.apply_local(op.clone());
-        self.redo_stack.push(entry);
+        self.redo_stack.push(redo);
         Some(op)
     }
 
     pub fn redo(&mut self) -> Option<Op> {
         let entry = self.redo_stack.pop()?;
-        let op = match &entry {
-            UndoEntry::Insert { id } => {
-                // Redo an insert: node id already exists (it was only tombstoned by
-                // undo, never removed) - restore it by removing our own undo-delete.
-                // We don't track which delete id undo used per entry here, so instead
-                // we re-derive it: the most recent Delete op in the log targeting `id`
-                // that came from this site is the undo op to reverse.
-                let undo_delete = self
-                    .op_log
-                    .iter()
-                    .rev()
-                    .find_map(|op| match op {
-                        Op::Delete { id: did, target } if *target == *id && did.site == self.site => {
-                            Some(*did)
-                        }
-                        _ => None,
-                    })
-                    .expect("redo of insert requires a prior undo-delete in the log");
+        let (op, undo) = match entry {
+            RedoEntry::RestoreNode { node, undo_delete } => {
+                // The node was only tombstoned by undo, never removed, so redoing the
+                // insert means clearing exactly the tombstone that undo added.
                 let restore_id = self.next_id();
-                Op::Restore {
-                    id: restore_id,
-                    target: *id,
-                    removes: undo_delete,
-                }
+                (
+                    Op::Restore {
+                        id: restore_id,
+                        target: node,
+                        removes: undo_delete,
+                    },
+                    UndoEntry::Insert { id: node },
+                )
             }
-            UndoEntry::Delete { delete_id, target } => {
+            RedoEntry::Redelete { target } => {
+                // A fresh delete op - and the undo entry must record *this* op's id,
+                // not the original delete's, or the next undo would try to remove a
+                // tombstone that is no longer in the set.
                 let del_id = self.next_id();
-                let _ = delete_id;
-                Op::Delete { id: del_id, target: *target }
+                (
+                    Op::Delete { id: del_id, target },
+                    UndoEntry::Delete { delete_id: del_id, target },
+                )
             }
         };
         self.apply_local(op.clone());
-        self.undo_stack.push(entry);
+        self.undo_stack.push(undo);
         Some(op)
     }
 
