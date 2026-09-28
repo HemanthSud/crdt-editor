@@ -351,8 +351,7 @@ between them is a genuinely easy thing to get wrong.
 │       ├── useCrdtClient.ts  WASM lifecycle, WebSocket, position conversion
 │       └── wasm/             Generated bindings (committed — see Deployment)
 ├── scripts/build-wasm.sh     Rebuilds WASM + records a source hash for CI
-├── Dockerfile, fly.toml      Server deployment
-└── PLAN.md                   Original design document and milestone plan
+└── Dockerfile, fly.toml      Server deployment
 ```
 
 ### How a keystroke flows through the system
@@ -484,6 +483,3 @@ shape.
 | 4. Offline queue + reconnect reconciliation + Postgres persistence | Next |
 | 5. Cursor / presence sync | Planned |
 | 6. Undo/redo across concurrent edits | Done and property-tested; batching still open |
-
-Design rationale, the original milestone breakdown, and the reasoning behind each
-scoping decision live in [`PLAN.md`](PLAN.md).
