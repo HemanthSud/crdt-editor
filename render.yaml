@@ -1,0 +1,20 @@
+# Render Blueprint for the CRDT WebSocket relay (free tier).
+#
+# Deploy: Render Dashboard -> New -> Blueprint -> select this repo.
+# Render reads this file, builds crates/server via the root Dockerfile, and
+# gives you a service at https://<service-name>.onrender.com (use wss:// for
+# the client's VITE_WS_URL).
+#
+# Free-tier tradeoff: the service spins down after 15 minutes with no traffic
+# and takes ~1 minute to cold-start on the next visit. Document state lives
+# only in memory (AppState.rooms in crates/server/src/main.rs), so every
+# spin-down clears all documents - the same limitation noted in "Known
+# limitations" below, just triggered by idle time instead of a deploy.
+
+services:
+  - name: crdt-editor
+    type: web
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health

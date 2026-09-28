@@ -351,7 +351,7 @@ between them is a genuinely easy thing to get wrong.
 │       ├── useCrdtClient.ts  WASM lifecycle, WebSocket, position conversion
 │       └── wasm/             Generated bindings (committed — see Deployment)
 ├── scripts/build-wasm.sh     Rebuilds WASM + records a source hash for CI
-└── Dockerfile, fly.toml      Server deployment
+└── Dockerfile, render.yaml, fly.toml   Server deployment (Render, Fly.io)
 ```
 
 ### How a keystroke flows through the system
@@ -387,25 +387,37 @@ compile, checks the committed WASM artifacts aren't stale, and builds the client
 The client is a static site; the server is a long-lived WebSocket process. They
 deploy separately.
 
-### Server (Fly.io)
+### Server — free option (Render)
+
+The live demo runs here. Render Dashboard → New → Blueprint → select this repo;
+it reads [`render.yaml`](render.yaml) and builds `crates/server` from the root
+`Dockerfile` on the free plan, at `https://<service-name>.onrender.com`.
+
+Free-tier tradeoff: the service spins down after 15 minutes of no traffic and
+cold-starts (~1 minute) on the next visit. Document state lives **in memory**
+(`AppState.rooms`), so a spin-down clears every open document — same
+limitation as below, just triggered by idle time instead of a deploy.
+Persistence is the next milestone.
+
+### Server — always-on option (Fly.io)
 
 ```bash
 fly launch --no-deploy    # once, to create the app
 fly deploy
 ```
 
-Document state lives **in memory** (`AppState.rooms`), so the server must not be
-auto-stopped or scaled beyond one machine — `fly.toml` sets
-`auto_stop_machines = false` and `min_machines_running = 1` for that reason. With
-auto-stop enabled, a document would silently vanish whenever the app idled out
-between visitors. Persistence is the next milestone.
+Costs money (no Fly.io free tier as of 2026 — billing is pro-rated per second
+a machine runs). In exchange, `fly.toml` sets `auto_stop_machines = false` and
+`min_machines_running = 1`, so the in-memory document state survives idle
+periods instead of being cleared on every cold start.
 
 ### Client (Vercel)
 
 Set the project's **root directory** to `client`, and add an environment variable:
 
 ```
-VITE_WS_URL=wss://<your-app>.fly.dev
+VITE_WS_URL=wss://<your-service>.onrender.com     # Render
+VITE_WS_URL=wss://<your-app>.fly.dev               # Fly.io
 ```
 
 It must be `wss://` — an HTTPS page is not permitted to open a plaintext `ws://`
