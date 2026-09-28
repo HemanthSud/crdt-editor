@@ -8,9 +8,11 @@ stepping on anyone else's.
 The editor is the demo. The interesting part is the ~450 lines of Rust underneath it,
 and the tests that keep it honest.
 
+**[Live demo →](https://crdt-editor-sigma.vercel.app/?doc=demo)**
+(Free-tier server — first load after idle can take ~1 minute to wake up.)
+
 <!-- Record the demo (see "Demo script"), save to docs/demo.gif, then uncomment:
 ![Two clients editing concurrently](docs/demo.gif)
-**[Live demo →](https://your-app.vercel.app/?doc=demo)**
 -->
 
 ---
