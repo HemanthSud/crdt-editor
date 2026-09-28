@@ -483,3 +483,7 @@ shape.
 | 4. Offline queue + reconnect reconciliation + Postgres persistence | Next |
 | 5. Cursor / presence sync | Planned |
 | 6. Undo/redo across concurrent edits | Done and property-tested; batching still open |
+
+## License
+
+MIT — see [LICENSE](LICENSE).
